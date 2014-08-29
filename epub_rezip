@@ -1,0 +1,151 @@
+#!/usr/bin/env python
+# epub_rezip --- Repackage EPUB files
+#
+# Author: Haden Pike <haden.pike@gmail.com>
+#
+# Copyright (c) 2014 Haden Pike
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+"""Repackage an uncompressed EPUB.
+
+This tool was born out of frustration with Apple's iBooks application,
+which unpacks a book to the iBooks folder when you add it to the bookshelf.
+The drive containing my ebooks died, and so I searched my system for copies.
+I located them in
+~/Library/Containers/com.apple.BKAgentService/Data/Documents/iBooks/Books/.
+Each sub-directory has the hashed book title for a name and contains the files
+that were packaged in the EPUB --- plus some extras that iBooks and OS X add.
+I just needed to repackage them to meet the EPUB specification.
+
+EPUB files are secretly zipped HTML and XML, so repackaging them
+isn't difficult.  This could have been done with two commands to /usr/bin/zip,
+but there was the problem of what to name the EPUB.  I could have just used
+the directory name, but I wouldn't know what book it was until I opened it.
+I decided on getting the title from the EPUB metadata, which means parsing XML.
+Unfortunately, Bash isn't good at that --- thus, this script."""
+
+from fnmatch import fnmatch
+from zipfile import ZipFile, ZIP_DEFLATED, ZIP_STORED
+import argparse
+import os
+import sys
+import time
+
+from lxml import etree
+
+CONTAINER_PATH = os.path.join("META-INF", "container.xml")
+NSS = {
+    "opf":"http://www.idpf.org/2007/opf",
+    "xhtml":"http://www.w3.org/1999/xhtml",
+    "dc":"http://purl.org/dc/elements/1.1/",
+    }
+
+def _update_mtime(path):
+    """check the last modification time of a file.
+
+    The zip standard does not support zipping files whose last modification date
+    was before 1980.  Such timestamps are not important to me,
+    so update the access and modification times to the current time.
+    @param path: the location of the file to be checked
+    @type path: str
+    """
+    mod_year = time.localtime(os.path.getmtime(path))[0]
+    if mod_year < 1980:
+        os.utime(path, None)
+
+def _get_title(src):
+    """Get the title of the book.
+
+    A .epub file contains a directory named META-INF, which contains a file
+    named container.xml, which points to a file (relative to the root)
+    named content.opf (usually), which contains the book metadata.
+    @param src: the path to the epub root
+    @type src: str
+    """
+    container = open(os.path.join(src, CONTAINER_PATH), "r").read()
+    tree = etree.fromstring(container)
+    rootfile = tree.find(".//{urn:oasis:names:tc:opendocument:xmlns:container}rootfile").attrib["full-path"]
+    opf = open(os.path.join(src, rootfile), "r").read()
+    tree = etree.fromstring(opf)
+    title = tree.xpath("//dc:title", namespaces = NSS)
+    if title:
+        return "{0}.epub".format(title[0].text)
+    else:
+        print "Unable to find title at path {0}.".format(src)
+        sys.exit(1)
+
+def rezip(src):
+    """Repackage a .epub.
+
+    EPUB books are just zipped HTML and XML.  Add each file and directory in src
+    to a zip file (excluding some OS and application metadata files).
+    The name of the new file is the title of the book (with .epub appended).
+    @param src: the path to the epub root
+    @type src: str
+    """
+    filename = _get_title(src)
+    with ZipFile(filename, "w", ZIP_DEFLATED) as zf:
+        # The mimetype file is special
+        try:
+            os.remove(os.path.join(src, "mimetype"))
+        except OSError:
+            pass
+        # It must be the first file in the archive, and uncompressed
+        zf.writestr(
+            "mimetype", "application/epub+zip", compress_type=ZIP_STORED)
+        for root, dirs, files in os.walk(src):
+            if root != src:
+                zf.write(root, os.path.relpath(root, src))
+            for file in files:
+                if fnmatch(file, "*.plist") or fnmatch(file, "*.DS_Store"): # iBooks adds these
+                    continue
+
+                filename = os.path.join(root, file)
+                if os.path.isfile(filename):
+                    _update_mtime(filename)
+                    arcname = os.path.join(os.path.relpath(root, src), file)
+                    zf.write(filename, arcname)
+
+def rezip_subdirs(base):
+    """Rezip each individual subdirectory.
+
+    This assumes each subdirectory is its own EPUB file, and calls L{rezip}
+    for each of them.
+    @param base: the directory in which each subdirectory is to be zipped
+    @type base: str
+    """
+    for dir in os.listdir(base):
+        src = os.path.join(base, dir)
+        if os.path.isdir(src):
+            rezip(src)
+
+def main():
+    parser = argparse.ArgumentParser(description = "Rezip an extracted .epub")
+    parser.add_argument("directory", metavar = "d",
+                        help = "Directory of unzipped .epub files")
+    parser.add_argument("-s", "--subdirs", dest = "zip", action = "store_const",
+                        const = rezip_subdirs, default = rezip,
+                        help = "Rezip subdirectories as individual .epub files")
+    args = parser.parse_args()
+    epubdir = os.path.abspath(os.path.expanduser(args.directory))
+    args.zip(epubdir)
+
+if __name__ == "__main__":
+    main()
