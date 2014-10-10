@@ -1,0 +1,79 @@
+#!/usr/bin/env ruby
+# Recursively search for EPUB titles matching a regular expression
+#
+# Author: Haden Pike <haden.pike@gmail.com>
+#
+# Copyright (c) 2014 Haden Pike
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+=begin
+iBooks on OS x extracts EPUB files to a directory deep within the ~/Library folder.  EPUB files  are zipped HTML and XML files, so they are unzipped to their own directory.  The name of this directory is the hashed EPUB name.  Unfortunately, this makes finding a particular EPUB difficult.
+
+Usage: epubfind [options]
+    Recursively tries to match the given regexp with EPUB titles and returns the path[s] of those which are successfull.
+    -r, --regexp [PATTERN]           Pattern to match
+    -d, --directory [DIR]            Where to begin the search
+=end
+
+require 'find'
+require 'optparse'
+require 'libxml'
+include LibXML
+
+CONTAINER_PATH = File.join("META-INF", "container.xml")
+NSS = {
+    :opf => "http://www.idpf.org/2007/opf",
+    :xhtml => "http://www.w3.org/1999/xhtml",
+    :dc => "http://purl.org/dc/elements/1.1/",
+}
+
+options = {}
+parser = OptionParser.new do |opts|
+  opts.version = 0.1
+  opts.banner = "Usage: #{opts.program_name} [options]\nRecursively tries to match the given regexp with EPUB titles and returns the path[s] of those which are successfull."
+  opts.on("-r", "--regexp [PATTERN]", "Pattern to match") do |v|
+    options['regexp'] = v
+  end
+  opts.on("-d", "--directory [DIR]", "Where to begin the search") do |v|
+    options['directory'] = v
+  end
+  begin
+    opts.parse!
+  rescue  OptionParser::ParseError
+    $stderr.puts "#{opts}" # Displays help
+    exit(1)
+  end
+end
+
+Find.find(options['directory']) do |p|
+  next if FileTest.file?(p)
+  container = File.join(p, CONTAINER_PATH)
+  next unless FileTest.exists?(container)
+  tree = XML::Document.file(container)
+  tree.root.namespaces.default_prefix = "cont"
+  rootfile = tree.find_first("//cont:rootfile")['full-path']
+  tree = XML::Document.file(File.join(p, rootfile))
+  title = tree.find_first("//dc:title", namespaces = NSS).content
+  puts "#{p}" if title.match(/#{options['regexp']}/)
+end
+
+# Local Variables:
+# mode: ruby
+# End:
