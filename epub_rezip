@@ -100,7 +100,8 @@ def rezip(src):
     @param src: the path to the epub root
     @type src: str
     """
-    filename = _get_title(src)
+    filename = _get_title(src).replace('/', '_')
+    
     with ZipFile(filename, "w", ZIP_DEFLATED) as zf:
         # The mimetype file is special
         try:
