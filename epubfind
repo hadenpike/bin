@@ -1,5 +1,5 @@
 #!/usr/bin/env ruby
-# Recursively search for EPUB titles matching a regular expression
+# epubfind --- Recursively search for EPUB titles matching a regular expression
 #
 # Author: Haden Pike <haden.pike@gmail.com>
 #
