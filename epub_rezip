@@ -86,10 +86,9 @@ def _get_title(src):
     tree = etree.fromstring(opf)
     title = tree.xpath("//dc:title", namespaces = NSS)
     if title:
-        return "{0}.epub".format(title[0].text)
+        return title[0].text.encode("utf-8")
     else:
-        print "Unable to find title at path {0}.".format(src)
-        sys.exit(1)
+        return None
 
 def rezip(src):
     """Repackage a .epub.
@@ -100,9 +99,15 @@ def rezip(src):
     @param src: the path to the epub root
     @type src: str
     """
-    filename = _get_title(src).replace('/', '_')
-    
-    with ZipFile(filename, "w", ZIP_DEFLATED) as zf:
+    title = _get_title(src)
+    if not title:
+        print "Unable to find title at path {0}.".format(src)
+        sys.exit(1)
+    book_file = "{0}.epub".format(title.replace('/', '_'))
+    if os.path.exists(book_file):
+        return
+    print "Zipping {0}".format(title)
+    with ZipFile(book_file, "w", ZIP_DEFLATED) as zf:
         # The mimetype file is special
         try:
             os.remove(os.path.join(src, "mimetype"))
@@ -113,6 +118,7 @@ def rezip(src):
             "mimetype", "application/epub+zip", compress_type=ZIP_STORED)
         for root, dirs, files in os.walk(src):
             if root != src:
+                _update_mtime(root)
                 zf.write(root, os.path.relpath(root, src))
             for file in files:
                 if fnmatch(file, "*.plist") or fnmatch(file, "*.DS_Store"): # iBooks adds these
