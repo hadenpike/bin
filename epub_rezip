@@ -117,9 +117,6 @@ def rezip(src):
         zf.writestr(
             "mimetype", "application/epub+zip", compress_type=ZIP_STORED)
         for root, dirs, files in os.walk(src):
-            if root != src:
-                _update_mtime(root)
-                zf.write(root, os.path.relpath(root, src))
             for file in files:
                 if fnmatch(file, "*.plist") or fnmatch(file, "*.DS_Store"): # iBooks adds these
                     continue
